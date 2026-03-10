@@ -11,7 +11,8 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "db:migrate": "prisma migrate dev",
-    "db:generate": "prisma generate"
+    "db:generate": "prisma generate",
+    "seed": "ts-node src/scripts/seed.ts"
   },
   "repository": {
     "type": "git",

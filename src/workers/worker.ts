@@ -1,4 +1,5 @@
 import dotenv from "dotenv";
+import { Prisma } from "@prisma/client";
 import { Job as BullJob, Worker } from "bullmq";
 import prisma from "../lib/prisma";
 import { deadLetterQueue } from "../lib/queue";
@@ -8,11 +9,89 @@ dotenv.config();
 
 interface ForemanJobData {
   jobId: string;
+  producerId: string;
   type: string;
   payload: Record<string, unknown>;
 }
 
+interface EmailPayload {
+  to: string;
+  subject: string;
+  body: string;
+}
+
+interface ReportPayload {
+  userId: string;
+  reportType: string;
+}
+
+interface EmailResult {
+  sent: true;
+  to: string;
+  timestamp: string;
+}
+
+interface ReportResult {
+  generated: true;
+  userId: string;
+  reportType: string;
+  timestamp: string;
+}
+
+type JobResult = EmailResult | ReportResult;
+
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const randomBetween = (min: number, max: number): number =>
+  Math.floor(Math.random() * (max - min + 1)) + min;
+
+const asNonEmptyString = (value: unknown, field: string): string => {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`Missing required field: ${field}`);
+  }
+
+  return value;
+};
+
+const handleEmailJob = async (payload: Record<string, unknown>): Promise<EmailResult> => {
+  try {
+    const to = asNonEmptyString(payload.to, "to");
+    const subject = asNonEmptyString(payload.subject, "subject");
+    const body = asNonEmptyString(payload.body, "body");
+
+    void subject;
+    void body;
+
+    await sleep(randomBetween(500, 800));
+
+    return {
+      sent: true,
+      to,
+      timestamp: new Date().toISOString(),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown email handler error";
+    throw new Error(`Email job failed: ${message}`);
+  }
+};
+
+const handleReportJob = async (payload: Record<string, unknown>): Promise<ReportResult> => {
+  try {
+    const userId = asNonEmptyString(payload.userId, "userId");
+    const reportType = asNonEmptyString(payload.reportType, "reportType");
+
+    await sleep(randomBetween(1500, 2500));
+
+    return {
+      generated: true,
+      userId,
+      reportType,
+      timestamp: new Date().toISOString(),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown report handler error";
+    throw new Error(`Report job failed: ${message}`);
+  }
+};
 
 const updateFailedJob = async (jobId: string, error: unknown): Promise<void> => {
   try {
@@ -33,7 +112,7 @@ const updateFailedJob = async (jobId: string, error: unknown): Promise<void> => 
 const worker = new Worker<ForemanJobData>(
   "foreman-jobs",
   async (job: BullJob<ForemanJobData>) => {
-    const { jobId } = job.data;
+    const { jobId, type, payload } = job.data;
 
     try {
       console.log(`Job received: ${jobId} (BullMQ ID: ${job.id})`);
@@ -51,16 +130,17 @@ const worker = new Worker<ForemanJobData>(
         },
       });
 
-      const randomDelayMs = Math.floor(Math.random() * 1000) + 1000;
-      await sleep(randomDelayMs);
+      let result: JobResult;
 
-      if (
-        typeof job.data.payload === "object" &&
-        job.data.payload !== null &&
-        "forceFail" in job.data.payload &&
-        job.data.payload.forceFail === true
-      ) {
-        throw new Error("Forced failure requested by payload");
+      switch (type) {
+        case "email":
+          result = await handleEmailJob(payload);
+          break;
+        case "report":
+          result = await handleReportJob(payload);
+          break;
+        default:
+          throw new Error(`Unknown job type: ${type}`);
       }
 
       await prisma.job.update({
@@ -68,16 +148,14 @@ const worker = new Worker<ForemanJobData>(
         data: {
           status: "completed",
           processedAt: new Date(),
-          result: {
-            message: "processed",
-          },
+          result: result as unknown as Prisma.InputJsonObject,
           error: null,
           failedAt: null,
         },
       });
 
       console.log(`Job completed: ${jobId} (BullMQ ID: ${job.id})`);
-      return { message: "processed" };
+      return result;
     } catch (error) {
       console.error(`Job failed in processor: ${jobId} (BullMQ ID: ${job.id})`, error);
       await updateFailedJob(jobId, error);
@@ -111,6 +189,7 @@ worker.on("failed", async (job: BullJob<ForemanJobData> | undefined, error: Erro
       await deadLetterQueue.add(job.name, {
         originalJobId: job.data.jobId,
         originalBullJobId: job.id,
+        producerId: job.data.producerId,
         type: job.data.type,
         payload: job.data.payload,
         error: error.message,

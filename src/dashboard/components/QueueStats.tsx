@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 interface DashboardJob {
   id: string;
   type: string;
+  producerId: string | null;
   status: string;
   attempts: number;
   createdAt: string;
@@ -21,6 +22,11 @@ interface StatsResponse {
   dead: number;
   throughputLast5Min: number;
   avgProcessingTimeMs: number;
+  byType: {
+    email: number;
+    report: number;
+    unknown: number;
+  };
   recentJobs: DashboardJob[];
 }
 
@@ -56,6 +62,32 @@ const getStatusBadgeClass = (status: string): string => {
     default:
       return "bg-gray-700 text-gray-100";
   }
+};
+
+const getBarWidthClass = (count: number, maxCount: number): string => {
+  if (maxCount <= 0 || count <= 0) {
+    return "w-0";
+  }
+
+  const ratio = count / maxCount;
+
+  if (ratio >= 1) {
+    return "w-full";
+  }
+
+  if (ratio >= 0.75) {
+    return "w-3/4";
+  }
+
+  if (ratio >= 0.5) {
+    return "w-1/2";
+  }
+
+  if (ratio >= 0.25) {
+    return "w-1/4";
+  }
+
+  return "w-1/12";
 };
 
 export default function QueueStats() {
@@ -115,6 +147,25 @@ export default function QueueStats() {
     return Math.max(0, Math.floor((now - lastUpdatedAt.getTime()) / 1000));
   }, [lastUpdatedAt, now]);
 
+  const jobsByTypeRows = useMemo(
+    () => [
+      { key: "email", label: "Email", count: stats?.byType.email ?? 0, colorClass: "bg-cyan-500" },
+      { key: "report", label: "Report", count: stats?.byType.report ?? 0, colorClass: "bg-emerald-500" },
+      {
+        key: "unknown",
+        label: "Unknown",
+        count: stats?.byType.unknown ?? 0,
+        colorClass: "bg-rose-500",
+      },
+    ],
+    [stats],
+  );
+
+  const maxJobsByType = useMemo(
+    () => Math.max(1, ...jobsByTypeRows.map((row) => row.count)),
+    [jobsByTypeRows],
+  );
+
   if (loading && !stats) {
     return (
       <section className="rounded-xl border border-gray-800 bg-panel p-6 shadow-lg shadow-black/30">
@@ -157,16 +208,32 @@ export default function QueueStats() {
           { label: "Active", value: stats.active },
           { label: "Completed", value: stats.completed },
           { label: "Failed", value: stats.failed },
-          { label: "Dead", value: stats.dead },
+          { label: "DLQ Depth", value: stats.dead },
         ].map((item) => (
-          <div
-            key={item.label}
-            className="rounded-lg border border-gray-700 bg-canvas p-4"
-          >
+          <div key={item.label} className="rounded-lg border border-gray-700 bg-canvas p-4">
             <p className="text-sm text-gray-400">{item.label}</p>
             <p className="mt-2 text-2xl font-bold text-gray-100">{item.value}</p>
           </div>
         ))}
+      </div>
+
+      <div className="rounded-lg border border-gray-700 bg-canvas p-4">
+        <h3 className="text-sm font-medium text-gray-200">Jobs by Type</h3>
+        <div className="mt-4 space-y-3">
+          {jobsByTypeRows.map((row) => (
+            <div key={row.key} className="space-y-1">
+              <div className="flex items-center justify-between text-xs text-gray-300">
+                <span>{row.label}</span>
+                <span>{row.count}</span>
+              </div>
+              <div className="h-2 w-full rounded bg-gray-800">
+                <div
+                  className={`h-2 rounded ${row.colorClass} ${getBarWidthClass(row.count, maxJobsByType)}`}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
@@ -186,6 +253,7 @@ export default function QueueStats() {
             <tr>
               <th className="px-4 py-3 font-medium">ID</th>
               <th className="px-4 py-3 font-medium">Type</th>
+              <th className="px-4 py-3 font-medium">Producer</th>
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-4 py-3 font-medium">Attempts</th>
               <th className="px-4 py-3 font-medium">Created At</th>
@@ -203,8 +271,11 @@ export default function QueueStats() {
                 <tr key={job.id}>
                   <td className="px-4 py-3 font-mono text-xs">{job.id}</td>
                   <td className="px-4 py-3">{job.type}</td>
+                  <td className="px-4 py-3">{job.producerId ?? "-"}</td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getStatusBadgeClass(job.status)}`}>
+                    <span
+                      className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${getStatusBadgeClass(job.status)}`}
+                    >
                       {job.status}
                     </span>
                   </td>

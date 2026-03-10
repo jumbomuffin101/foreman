@@ -1,10 +1,11 @@
 import { Prisma } from "@prisma/client";
 import { Router, Request, Response, NextFunction } from "express";
 import prisma from "../../lib/prisma";
-import { jobQueue } from "../../lib/queue";
+import { isProducerRateLimited, jobQueue } from "../../lib/queue";
 
 interface CreateJobBody {
   type?: string;
+  producerId?: string;
   payload?: Prisma.InputJsonObject;
 }
 
@@ -23,15 +24,29 @@ router.post(
   ): Promise<void> => {
     try {
       const { type, payload } = req.body;
+      const producerId = req.body.producerId ?? "anonymous";
+
+      if (typeof producerId !== "string" || producerId.trim().length === 0) {
+        res.status(400).json({ error: "producerId must be a non-empty string when provided." });
+        return;
+      }
 
       if (!type || !payload || typeof payload !== "object" || Array.isArray(payload)) {
         res.status(400).json({ error: "Both type and payload are required." });
         return;
       }
 
+      const { limited } = await isProducerRateLimited(producerId);
+
+      if (limited) {
+        res.status(429).json({ error: "Rate limit exceeded", producerId });
+        return;
+      }
+
       const createdJob = await prisma.job.create({
         data: {
           type,
+          producerId,
           payload,
           status: "waiting",
         },
@@ -39,6 +54,7 @@ router.post(
 
       const bullJob = await jobQueue.add(type, {
         jobId: createdJob.id,
+        producerId,
         type,
         payload,
       });
