@@ -1,10 +1,17 @@
 {
   "name": "foreman",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Distributed job queue with real-time monitoring dashboard",
+  "main": "dist/api/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "api": "ts-node src/api/server.ts",
+    "worker": "ts-node src/workers/worker.ts",
+    "dev:api": "nodemon --exec ts-node src/api/server.ts",
+    "dev:worker": "nodemon --exec ts-node src/workers/worker.ts",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "db:migrate": "prisma migrate dev",
+    "db:generate": "prisma generate"
   },
   "repository": {
     "type": "git",
@@ -18,12 +25,12 @@
   },
   "homepage": "https://github.com/jumbomuffin101/foreman#readme",
   "dependencies": {
-    "@prisma/client": "^7.4.2",
+    "@prisma/client": "^6.16.2",
     "bullmq": "^5.70.4",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "ioredis": "^5.10.0",
-    "prisma": "^7.4.2"
+    "prisma": "^6.16.2"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
